@@ -20,8 +20,10 @@ from ibapi.contract import Contract
 
 import threading
 import time
+import datetime
 from sqlalchemy import create_engine
 import pymysql
+import pytz
 
 
 # Acquire different types of data and save data to database
@@ -47,6 +49,9 @@ class DataAPI(wrapper.EWrapper, EClient):
         self.max_duration = 86400  # historical data before 24 hours is not available
         self.__duration = 5
 
+        # use latest time of already stored data to avoid data overlapping
+        self.latest_time = int(time.time()) - self.max_duration
+
         # Check contract type
         if self.contract_type == 'STK':
             self.contract = self.stock_contract(symbol)
@@ -63,11 +68,11 @@ class DataAPI(wrapper.EWrapper, EClient):
                                        'Close', 'Volume', 'Average', 'Count'])
 
         # Database connection setting
-        self.__database_username = 'username'
-        self.__database_password = 'password'
+        self.__database_username = 'root'
+        self.__database_password = 'yang930805'
         self.__database_ip = 'localhost'
         self.__database_port = 3306
-        self.__database_name = 'databasename'
+        self.__database_name = 'ibapi'
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
@@ -167,13 +172,23 @@ class DataAPI(wrapper.EWrapper, EClient):
         df = pd.DataFrame(self.data,
                           columns=['Contract', 'DateTime', 'Open', 'High', 'Low', 'Close', 'Volume', 'Average',
                                    'Count'])
+
+        """
+        Use dataframe slice to avoid data overlapping 
+        df['DateTime'].iloc[0:1] - the earlist time of data requested
+        self.latest_time - the time of last data in the database
+        Use slice to ensure that the data to be saved do not overlap the existing data in database
+        """
+        df['DateTime'] = df['DateTime'].astype(int)
+        if (df['DateTime'].iloc[0:1] <= self.latest_time).bool():
+            df = df[(df['DateTime'] > self.latest_time)]
+            print(df.head(5))
         try:
-            df.to_sql(name='realtimebar', con=self.engine, if_exists='append', index=False, chunksize=2000,
+            df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
                       method='multi')
             self.__historical_flag = True
-            print("Historical data saved to Database.")
-        except Exception:
-            print("Error occured when storing historical data to database!")
+        except (ValueError, pymysql.exc.OperationalError, pymysql.exc.IntegrityError) as err:
+            print("Error {} occured when storing historical data to database!".format(err))
             self.__historical_flag = False
 
     # clear the data list
@@ -191,12 +206,13 @@ class DataAPI(wrapper.EWrapper, EClient):
                           columns=['Contract', 'DateTime', 'Open', 'High', 'Low',
                                    'Close', 'Volume', 'Average', 'Count'])
         try:
-            df.to_sql(name='realtimebar', con=self.engine, if_exists='append', index=False, chunksize=2000,
+            df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
                       method='multi')
             print("Saving real-time bar...")
-        except Exception:
-            #
-            print("Error occured when storing real-time bar data to database!")
+        except (ValueError, pymysql.exc.OperationalError, pymysql.exc.IntegrityError) as err:
+            print("Error {} occured when storing real_time data to database!".format(err))
+            # Normally, the first real-time data will concur an IntegrityError, but it does not matter.
+
 
         # return the real-time data for further use
         self.dataframe = df
@@ -210,9 +226,10 @@ class DataAPI(wrapper.EWrapper, EClient):
         """
         time.sleep(1)
         self.cal_duration()
+        # 可能在5点和6点之间
         self.reqHistoricalData(self.reqID, contract=self.contract, endDateTime='',
                                durationStr=str(self.__duration) + ' ' + 'S',
-                               barSizeSetting='5 secs', whatToShow='midpoint', useRTH=0, formatDate=2,
+                               barSizeSetting='5 secs', whatToShow='midpoint', useRTH=1, formatDate=2,
                                keepUpToDate=False, chartOptions=[])
         self.increment_id()
 
@@ -261,7 +278,7 @@ class DataAPI(wrapper.EWrapper, EClient):
                 SELECT
                     MAX( DateTime ) 
                 FROM
-                    realtimebar 
+                    fivesecondbar 
                 WHERE
                     Contract = '{}'
                """.format(self.symbol)
@@ -269,10 +286,13 @@ class DataAPI(wrapper.EWrapper, EClient):
         last_time = cur.fetchone()[0]
 
         current_time = int(time.time())
+
         if last_time is None:
             self.__duration = self.max_duration
         else:
+            last_time = int(last_time)
             self.__duration = current_time - last_time - 5
+            self.latest_time = last_time
             if self.__duration >= self.max_duration:
                 self.__duration = self.max_duration
         print("duration", self.__duration)
