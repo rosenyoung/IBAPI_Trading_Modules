@@ -226,7 +226,6 @@ class DataAPI(wrapper.EWrapper, EClient):
         """
         time.sleep(1)
         self.cal_duration()
-        # 可能在5点和6点之间
         self.reqHistoricalData(self.reqID, contract=self.contract, endDateTime='',
                                durationStr=str(self.__duration) + ' ' + 'S',
                                barSizeSetting='5 secs', whatToShow='midpoint', useRTH=1, formatDate=2,
