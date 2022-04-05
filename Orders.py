@@ -46,11 +46,11 @@ class Orders(wrapper.EWrapper, EClient):
         self.account_summary_tag = 'NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue'
 
         # Database connection setting
-        self.__database_username = 'root'
-        self.__database_password = 'yang930805'
+        self.__database_username = 'username'
+        self.__database_password = 'password'
         self.__database_ip = 'localhost'
         self.__database_port = 3306
-        self.__database_name = 'ibapi'
+        self.__database_name = 'databasename'
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
