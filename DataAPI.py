@@ -30,10 +30,6 @@ class DataAPI(wrapper.EWrapper, EClient):
         """
         symbol: str - The contract symbol, such as 'EUR', 'AAPL'
         contrancttype: str - 'FX' or 'STK'
-        duration: int - the period of historical data. If the duration is 3600 seconds, then when requesting
-        historical data, the data of the last 1 hour will be acquired.Normally, duration should be the time
-        interval between the last time of data in database and
-        current time.
         """
         wrapper.EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
@@ -65,11 +61,11 @@ class DataAPI(wrapper.EWrapper, EClient):
                                        'Close', 'Volume', 'Average', 'Count'])
 
         # Database connection setting
-        self.__database_username = 'username'
-        self.__database_password = 'password'
+        self.__database_username = 'root'
+        self.__database_password = 'yang930805'
         self.__database_ip = 'localhost'
         self.__database_port = 3306
-        self.__database_name = 'databasename'
+        self.__database_name = 'ibapi'
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
@@ -209,8 +205,13 @@ class DataAPI(wrapper.EWrapper, EClient):
                                    'Close', 'Volume', 'Average', 'Count'])
         try:
             if len(df) > 0:
-                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
-                print("Saving real-time bar...")
+                # After some time point of the day, realtimeBar will return extra 900 seconds data at first request.
+                # To avoid overlapping data, only leave the last row of data if length > 1.
+                if len(df) > 1:
+                    df = df.tail(1)
+                    print(df)
+                    df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
+                    print("Saving real-time bar...")
 
                 # return the real-time data for further use
                 self.dataframe = df
@@ -269,7 +270,7 @@ class DataAPI(wrapper.EWrapper, EClient):
     def cal_duration(self):
         """
         This method calculate the time interval between current time and the lasted time of the data stored in database.
-        Then pass the self。duration to the reqHistoricalData method to avoid duplicated data.
+        Then pass the self。duration to the reqHistoricalBar method to avoid duplicated data.
         """
         sql_conn = pymysql.connect(host=self.__database_ip,
                                    user=self.__database_username,
