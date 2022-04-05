@@ -1,6 +1,6 @@
 """
 
-Author: Ruosen Yang
+Author: Rosenyoung
 This API class inherit the Wrapper and Client class, and overrides the methods of EWrapper. This API overrides
 the function of EWrapper, translate the data requested into dataframe and store the data into mysql database.
 
@@ -11,19 +11,16 @@ This API is designed for 5 seconds bar data only.
 
 from ibapi import wrapper
 from ibapi.client import EClient
+from ibapi.common import BarData
+from ibapi.contract import Contract
 
 import pandas as pd
 import numpy as np
 
-from ibapi.common import BarData
-from ibapi.contract import Contract
-
 import threading
-import time
-import datetime
+import time as time_module
 from sqlalchemy import create_engine
 import pymysql
-import pytz
 
 
 # Acquire different types of data and save data to database
@@ -46,11 +43,11 @@ class DataAPI(wrapper.EWrapper, EClient):
         self.symbol = symbol
         self.contract_type = contract_type
 
-        self.max_duration = 86400  # historical data before 24 hours is not available
+        self.max_duration = 86400  # Max time interval of data requested,data before 24 hours is not available
         self.__duration = 5
 
         # use latest time of already stored data to avoid data overlapping
-        self.latest_time = int(time.time()) - self.max_duration
+        self.latest_time = int(time_module.time()) - self.max_duration
 
         # Check contract type
         if self.contract_type == 'STK':
@@ -68,11 +65,11 @@ class DataAPI(wrapper.EWrapper, EClient):
                                        'Close', 'Volume', 'Average', 'Count'])
 
         # Database connection setting
-        self.__database_username = 'root'
-        self.__database_password = 'yang930805'
+        self.__database_username = 'username'
+        self.__database_password = 'password'
         self.__database_ip = 'localhost'
         self.__database_port = 3306
-        self.__database_name = 'ibapi'
+        self.__database_name = 'databasename'
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
@@ -115,7 +112,8 @@ class DataAPI(wrapper.EWrapper, EClient):
         print('DataAPI Connected.')
 
     # Define foreign exchange contract
-    def fx_contract(self, symbol: str):
+    @staticmethod
+    def fx_contract(symbol: str):
         """create fx_contract"""
         contract = Contract()
         contract.symbol = symbol
@@ -125,7 +123,8 @@ class DataAPI(wrapper.EWrapper, EClient):
         return contract
 
     # Define stock contract
-    def stock_contract(self, symbol: str):
+    @staticmethod
+    def stock_contract(symbol: str):
         """
         For more contract type and details
         See ...IB_API\samples\Python\Testbed\ContractSamples.py
@@ -150,7 +149,7 @@ class DataAPI(wrapper.EWrapper, EClient):
 
         """
         while True:
-            time.sleep(1)
+            time_module.sleep(1)
             if len(self.data) > 0:
                 break
         df = pd.DataFrame(self.data,
@@ -165,7 +164,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         Save historical data into the database
         """
         while True:
-            time.sleep(1)
+            time_module.sleep(1)
             if len(self.data) > 0:
                 break
 
@@ -182,12 +181,15 @@ class DataAPI(wrapper.EWrapper, EClient):
         df['DateTime'] = df['DateTime'].astype(int)
         if (df['DateTime'].iloc[0:1] <= self.latest_time).bool():
             df = df[(df['DateTime'] > self.latest_time)]
-            print(df.head(5))
         try:
-            df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
-                      method='multi')
+            if len(df) > 0 :
+                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
+                          method='multi')
+                print("Historical data saved successfully.")
+            else:
+                print("No data is needed to be saved")
             self.__historical_flag = True
-        except (ValueError, pymysql.exc.OperationalError, pymysql.exc.IntegrityError) as err:
+        except Exception as err:
             print("Error {} occured when storing historical data to database!".format(err))
             self.__historical_flag = False
 
@@ -206,16 +208,19 @@ class DataAPI(wrapper.EWrapper, EClient):
                           columns=['Contract', 'DateTime', 'Open', 'High', 'Low',
                                    'Close', 'Volume', 'Average', 'Count'])
         try:
-            df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
-                      method='multi')
-            print("Saving real-time bar...")
-        except (ValueError, pymysql.exc.OperationalError, pymysql.exc.IntegrityError) as err:
+            if len(df) > 0:
+                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
+                print("Saving real-time bar...")
+
+                # return the real-time data for further use
+                self.dataframe = df
+        except Exception as err:
             print("Error {} occured when storing real_time data to database!".format(err))
-            # Normally, the first real-time data will concur an IntegrityError, but it does not matter.
+            # Normally, the first real-time data is likely to concur an IntegrityError(Overlapping data)
+            # But it does not matter.
 
 
-        # return the real-time data for further use
-        self.dataframe = df
+
 
     def request_historical_bar(self):
         """
@@ -224,7 +229,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         So duplicated data will not be stored.
         The dataframe.to_sql can only insert data without overlapping.
         """
-        time.sleep(1)
+        time_module.sleep(1)
         self.cal_duration()
         self.reqHistoricalData(self.reqID, contract=self.contract, endDateTime='',
                                durationStr=str(self.__duration) + ' ' + 'S',
@@ -249,7 +254,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         count = 1
         while True:
             print("Historical data have not been updated!")
-            time.sleep(1)
+            time_module.sleep(1)
             count += 1
             if self.__historical_flag:
                 print("Historical data updated!")
@@ -284,7 +289,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         cur.execute(sql)
         last_time = cur.fetchone()[0]
 
-        current_time = int(time.time())
+        current_time = int(time_module.time())
 
         if last_time is None:
             self.__duration = self.max_duration
@@ -295,6 +300,7 @@ class DataAPI(wrapper.EWrapper, EClient):
             if self.__duration >= self.max_duration:
                 self.__duration = self.max_duration
         print("duration", self.__duration)
+        sql_conn.close()
 
 
 if __name__ == '__main__':
@@ -302,3 +308,6 @@ if __name__ == '__main__':
     dataapi.request_historical_bar()
     dataapi.historical_to_database()
     dataapi.request_realtime_bar()
+    while True:
+        time_module.sleep(4)
+        print(dataapi.dataframe)

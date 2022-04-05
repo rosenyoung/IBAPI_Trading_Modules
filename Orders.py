@@ -1,51 +1,49 @@
+"""
+Author: Rosenyoung
+This module is designed for placing orders and save the order status and position status into database
+Position information will be updated after an order is submitted.
+This module is also used for clear the position of one asset
+This module can update account summary information if you want.
+
+Version 1.0 2022-04-03
+Support 3 kinds of order: Market, Limit, Market if touched
+
+"""
+
 from ibapi import wrapper
 from ibapi.client import EClient
+from ibapi.contract import Contract
+from ibapi.order import Order
+from decimal import Decimal
 
 import pandas as pd
 import numpy as np
 
-from ibapi.common import BarData
-from ibapi.contract import Contract
-
 import threading
 import time
+
 from sqlalchemy import create_engine
 import pymysql
 
 class Orders(wrapper.EWrapper, EClient):
 
-    def __init__(self, symbol, contract_type):
+    def __init__(self,contract_type):
         """
-        symbol: str - The contract symbol, such as 'EUR', 'AAPL'
-        contranct_type: str - 'FX' or 'STK'
-        duration: int - the period of historical data. If the duration is 3600 seconds, then when requesting
-        historical data, the data of the last 1 hour will be acquired.Normally, duration should be the time
-        interval between the last time of data in database and
-        current time.
+        contract_type:str - 'FX' or 'STK'
+        You must create different order object for different contract type
         """
         wrapper.EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
         self.reqID = None
 
-        self.data = []  # store data temporary
-        self.symbol = symbol
         self.contract_type = contract_type
 
-
         # Check contract type
-        if self.contract_type == 'STK':
-            self.contract = self.stock_contract(symbol)
-        elif self.contract_type == 'FX':
-            self.contract = self.fx_contract(symbol)
-        else:
+        if self.contract_type not in ['STK', 'FX']:
             print(" Not a supported symbol")
 
-        # Create a list to store data temporary
-        self.data = []
-
-        # Create a dataframe to append realtime value.
-        self.dataframe = pd.DataFrame(['Contract', 'DateTime', 'Open', 'High', 'Low',
-                                       'Close', 'Volume', 'Average', 'Count'])
+        # Define the tags of account_summary
+        self.account_summary_tag = 'NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue'
 
         # Database connection setting
         self.__database_username = 'username'
@@ -56,24 +54,21 @@ class Orders(wrapper.EWrapper, EClient):
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
+        self.data_conn = pymysql.connect(host=self.__database_ip,
+                                   user=self.__database_username,
+                                   password=self.__database_password,
+                                   database=self.__database_name,
+                                   port=self.__database_port,
+                                   )
+        self.cur = self.data_conn.cursor()
 
-        # Check whetehr historical data has been saved
-        self.__historical_flag = False
 
-        # Creating  a random number as clientId
-        CId = np.random.randint(100)
+        # Creating  a random number between 100-149 as clientId
+        CId = np.random.randint(100, 150)
 
-        print('DataAPI Connecintg...')
+        print('Orders API Connecintg...')
         # connect to the IB TWS
         self.connect('127.0.0.1', 7497, clientId=CId)
-
-        """
-        Request frozen market data in case live is not available.
-        Different market data subscriptions give you access to different information
-        https://interactivebrokers.github.io/tws-api/market_data_type.html#gsc.tab=0
-        Type of data, type 2 returns the last snapshot if market is not open
-        """
-        self.reqMarketDataType(4)
 
         # Threading control
         self.thread = threading.Thread(target=self.run)
@@ -92,10 +87,11 @@ class Orders(wrapper.EWrapper, EClient):
 
     def connectAck(self):
         """ callback signifying completion of successful connection """
-        print('DataAPI Connected.')
+        print('Orders API Connected.')
 
     # Define foreign exchange contract
-    def fx_contract(self, symbol: str):
+    @staticmethod
+    def fx_contract(symbol: str):
         """create fx_contract"""
         contract = Contract()
         contract.symbol = symbol
@@ -105,7 +101,8 @@ class Orders(wrapper.EWrapper, EClient):
         return contract
 
     # Define stock contract
-    def stock_contract(self, symbol: str):
+    @staticmethod
+    def stock_contract(symbol: str):
         """
         For more contract type and details
         See ...IB_API\samples\Python\Testbed\ContractSamples.py
@@ -116,3 +113,236 @@ class Orders(wrapper.EWrapper, EClient):
         contract.currency = "USD"
         contract.exchange = 'ISLAND'
         return contract
+
+    # Define the market order.
+    @staticmethod
+    def MarketOrder(action: str, quantity: Decimal):
+
+        # ! [market]
+        order = Order()
+        order.action = action
+        order.orderType = "MKT"
+        order.totalQuantity = quantity
+        # ! [market]
+        return order
+
+    # Define the market order which will be excuted if a target price is touched
+    @staticmethod
+    def MarketIfTouched(action: str, quantity: Decimal, price: float):
+
+        # ! [market_if_touched]
+        order = Order()
+        order.action = action
+        order.orderType = "MIT"
+        order.totalQuantity = quantity
+        order.auxPrice = price
+        # ! [market_if_touched]
+        return order
+
+    # Define a limit order
+    @staticmethod
+    def LimitOrder(action: str, quantity: Decimal, limitPrice: float):
+
+        # ! [limitorder]
+        order = Order()
+        order.action = action
+        order.orderType = "LMT"
+        order.totalQuantity = quantity
+        order.lmtPrice = limitPrice
+        # ! [limitorder]
+        return order
+
+    # Close the database connection
+    def close_conn(self):
+        self.data_conn.close()
+
+    def place_orders(self, symbol, order_type, action, amount, price=1.10000):
+        """
+        symbol:str - symbol of the underlying,e.g. 'EUR', 'GBP', 'AAPL'
+        order_type:str - 'MKT', 'LMT', or 'MKTIFTCH'
+        action:str - 'buy' or 'sell'
+        amount: Decimal
+        price: float
+
+        """
+        if self.contract_type == 'STK':
+            self.contract = self.stock_contract(symbol)
+        elif self.contract_type == 'FX':
+            self.contract = self.fx_contract(symbol)
+
+        order = Order()
+        timestamp = int(time.time())
+        if order_type == 'MKT':
+            order = self.MarketOrder(action, amount)
+        elif order_type == 'LMT':
+            order = self.LimitOrder(action, amount, price)
+        elif order_type == 'MKTIFTCH':
+            order = self.MarketIfTouched(action, amount, price)
+        else:
+            raise Exception("Unsupported order type!")
+
+        # Place the order
+        self.placeOrder(timestamp, self.contract, order)
+
+        # Save the order submitted immediately, waiting for
+        initial_order_sql = f"""
+                INSERT INTO orderstatus ( OrderID, Contract, Action, `Status`, AmountFilled, Remaining, AvgFillPrice, ClientID )
+                VALUES
+        	    ('{timestamp}', '{symbol}', '{action}', 'Submitted', 0.0, 0.0, 0.0, '{self.clientId}')
+                """
+        print("Saving the order: " + initial_order_sql)
+
+        try:
+            self.cur.execute(initial_order_sql)
+            self.data_conn.commit()
+        except Exception as err:
+            self.data_conn.rollback()
+            print("Error {} happened when initially saving order status!".format(err))
+
+        # Sleep 1 second to avoid duplicated orderID
+        time.sleep(1)
+
+    def orderStatus(self, orderId , status, filled,
+                    remaining, avgFillPrice, permId,
+                    parentId, lastFillPrice, clientId,
+                    whyHeld, mktCapPrice):
+        """
+        Save order status into database.
+        Once order status is updated, call the reqPositions function and update position information.
+        """
+        current_time = time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
+        order_status_sql = f"""
+        UPDATE orderstatus
+        SET
+	    `Status` = '{status}', 
+	    AmountFilled = {filled}, 
+	    Remaining = {remaining}, 
+	    AvgFillPrice = {avgFillPrice}, 
+	    ClientID = '{clientId}', 
+	    LastUpdTime = '{current_time}'
+	    WHERE
+	    OrderID = {orderId}
+        """
+        print("Updating order status: "+ order_status_sql)
+
+        try:
+            self.cur.execute(order_status_sql)
+            self.data_conn.commit()
+        except Exception as err:
+            self.data_conn.rollback()
+            print("Error {} happened when updating order status!".format(err))
+
+        # Update position data after an order is placed
+        self.reqPositions()
+
+
+
+
+    def accountSummary(self, reqId:int, account:str, tag:str, value:str,
+                       currency:str):
+        # Saving account summary to database
+        current_timestamp = int(time.time())
+        upd_account_summary_sql = f"""
+        INSERT INTO accountsummary (Account, `TimeStamp`,  {tag})
+        VALUES
+	    ('{account}', '{current_timestamp}', '{value}')
+	    ON DUPLICATE KEY UPDATE
+		{tag} = '{value}'
+        """
+        print('Account summary sql: ' + upd_account_summary_sql)
+        try:
+            self.cur.execute(upd_account_summary_sql)
+            self.data_conn.commit()
+        except Exception as err:
+            self.data_conn.rollback()
+            print("Error {} happened when updating order status!".format(err))
+
+
+    def accountSummaryEnd(self, reqId:int):
+        # Notify an account summary request has ended.
+        print(f"Account summary request {reqId} ends!")
+
+
+    def position(self, account, contract, position,
+                 avgCost):
+
+        # Saving current positions to database
+        current_timestamp = int(time.time())
+        upd_position_sql = f"""
+                INSERT INTO position (Account, `TimeStamp`,  Contract, Position, AvgCost)
+                VALUES
+        	    ('{account}', '{current_timestamp}', '{contract.symbol}', '{position}', '{avgCost}')
+        	    ON DUPLICATE KEY UPDATE
+        		Position = '{position}',
+        		AvgCost = '{avgCost}'
+                """
+        print('Position sql: ' + upd_position_sql)
+
+        try:
+            self.cur.execute(upd_position_sql)
+            self.data_conn.commit()
+        except Exception as err:
+            self.data_conn.rollback()
+            print("Error {} happened when updating position information!".format(err))
+
+    def clear_position(self, symbol):
+        # Clear current position of an asset
+        current_postion_sql = f""" SELECT
+                                        position 
+                                    FROM
+                                        position 
+                                    WHERE
+                                        contract = '{symbol}' 
+                                        AND `timestamp` = (
+                                        SELECT
+                                            MAX( `timestamp` ) 
+                                        FROM
+                                            position 
+                                    WHERE
+                                        contract = '{symbol}')
+        """
+        self.cur.execute(current_postion_sql)
+        current_position = self.cur.fetchone()[0]
+        print("Current position: " + str(current_position))
+
+        if current_position is not None:
+            if current_position > 0:
+                self.place_orders(symbol,'MKT','sell',current_position)
+            elif current_position < 0:
+                self.place_orders(symbol, 'MKT', 'buy', current_position)
+
+        print("Position Cleared")
+
+
+    def positionEnd(self):
+        # Notify an position information request has ended.
+        print("Request position end!")
+
+if __name__ == '__main__':
+    orders_api = Orders('FX')
+    time.sleep(5)
+    orders_api.place_orders('EUR','MKT','buy',110000)
+    orders_api.place_orders('GBP','MKT','buy',100000)
+    orders_api.place_orders('EUR','LMT','sell',100000,1.30)
+    time.sleep(5)
+    orders_api.place_orders('EUR','MKT','sell',100000)
+    orders_api.place_orders('GBP','MKT','sell',100000)
+    get_orderid_sql = "Select orderid FROM orderstatus WHERE status != 'filled' order by orderid desc"
+    orders_api.cur.execute(get_orderid_sql)
+    orderid = orders_api.cur.fetchone()[0]
+    print("OrderID:" + str(orderid))
+    orders_api.cancelOrder(orderid)
+    time.sleep(5)
+    orders_api.clear_position('EUR')
+
+    orders_api.reqAccountSummary(orders_api.reqID, 'All', orders_api.account_summary_tag)
+    orders_api.increment_id()
+
+
+
+
+
+
+
+
+
