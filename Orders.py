@@ -46,11 +46,11 @@ class Orders(wrapper.EWrapper, EClient):
         self.account_summary_tag = 'NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue'
 
         # Database connection setting
-        self.__database_username = 'username'
-        self.__database_password = 'password'
+        self.__database_username = 'root'
+        self.__database_password = 'yang930805'
         self.__database_ip = 'localhost'
         self.__database_port = 3306
-        self.__database_name = 'databasename'
+        self.__database_name = 'ibapi'
         self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
                                     format(self.__database_username, self.__database_password,
                                            self.__database_ip, self.__database_name))
@@ -260,6 +260,7 @@ class Orders(wrapper.EWrapper, EClient):
 
     def accountSummaryEnd(self, reqId:int):
         # Notify an account summary request has ended.
+        self.cancelAccountSummary(reqId)
         print(f"Account summary request {reqId} ends!")
 
 
@@ -298,7 +299,7 @@ class Orders(wrapper.EWrapper, EClient):
                                             MAX( `timestamp` ) 
                                         FROM
                                             position 
-                                    WHERE
+                                        WHERE
                                         contract = '{symbol}')
         """
         self.cur.execute(current_postion_sql)
@@ -316,6 +317,7 @@ class Orders(wrapper.EWrapper, EClient):
 
     def positionEnd(self):
         # Notify an position information request has ended.
+        self.cancelPositions()
         print("Request position end!")
 
 if __name__ == '__main__':
@@ -334,6 +336,7 @@ if __name__ == '__main__':
     orders_api.cancelOrder(orderid)
     time.sleep(5)
     orders_api.clear_position('EUR')
+    time.sleep(5)
 
     orders_api.reqAccountSummary(orders_api.reqID, 'All', orders_api.account_summary_tag)
     orders_api.increment_id()
