@@ -8,6 +8,7 @@ Version 1.0 2022-03-17
 This API is designed for 5 seconds bar data only.
 
 """
+import time
 
 from ibapi import wrapper
 from ibapi.client import EClient
@@ -19,8 +20,11 @@ import numpy as np
 
 import threading
 import time as time_module
-from sqlalchemy import create_engine
-import pymysql
+
+from DataBaseConn import DataBaseConn
+
+
+
 
 
 # Acquire different types of data and save data to database
@@ -51,7 +55,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         elif self.contract_type == 'FX':
             self.contract = self.fx_contract(symbol)
         else:
-            print(" Not a supported symbol")
+            print.critical(" Not a supported symbol")
 
         # Create a list to store data temporary
         self.data = []
@@ -60,15 +64,10 @@ class DataAPI(wrapper.EWrapper, EClient):
         self.dataframe = pd.DataFrame(['Contract', 'DateTime', 'Open', 'High', 'Low',
                                        'Close', 'Volume', 'Average', 'Count'])
 
-        # Database connection setting
-        self.__database_username = 'username'
-        self.__database_password = 'password'
-        self.__database_ip = 'localhost'
-        self.__database_port = 3306
-        self.__database_name = 'databasename'
-        self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
-                                    format(self.__database_username, self.__database_password,
-                                           self.__database_ip, self.__database_name))
+        database_conn = DataBaseConn()
+        self.engine = database_conn.engine
+        self.data_conn = database_conn.conn
+        self.cur = database_conn.cur
 
         # Check whetehr historical data has been saved
         self.__historical_flag = False
@@ -204,14 +203,13 @@ class DataAPI(wrapper.EWrapper, EClient):
                           columns=['Contract', 'DateTime', 'Open', 'High', 'Low',
                                    'Close', 'Volume', 'Average', 'Count'])
         try:
+            # After some time point of the day, realtimeBar will return extra 900 seconds data at first request.
+            # To avoid overlapping data, only leave the last row of data if length > 1.
+            if len(df) > 1:
+                df = df.tail(1)
             if len(df) > 0:
-                # After some time point of the day, realtimeBar will return extra 900 seconds data at first request.
-                # To avoid overlapping data, only leave the last row of data if length > 1.
-                if len(df) > 1:
-                    df = df.tail(1)
-                    print(df)
-                    df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
-                    print("Saving real-time bar...")
+                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
+                print("Saving real-time bar...")
 
                 # return the real-time data for further use
                 self.dataframe = df
@@ -264,7 +262,7 @@ class DataAPI(wrapper.EWrapper, EClient):
                 print("Waiting too long...")
                 break
         if self.__historical_flag:
-            self.reqRealTimeBars(self.reqID, dataapi.contract, 5, 'MIDPOINT', 1, [])
+            self.reqRealTimeBars(self.reqID, self.contract, 5, 'MIDPOINT', 1, [])
             self.increment_id()
 
     def cal_duration(self):
@@ -272,13 +270,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         This method calculate the time interval between current time and the lasted time of the data stored in database.
         Then pass the self。duration to the reqHistoricalBar method to avoid duplicated data.
         """
-        sql_conn = pymysql.connect(host=self.__database_ip,
-                                   user=self.__database_username,
-                                   password=self.__database_password,
-                                   database=self.__database_name,
-                                   port=self.__database_port,
-                                   )
-        cur = sql_conn.cursor()
+
         sql = """
                 SELECT
                     MAX( DateTime ) 
@@ -287,8 +279,9 @@ class DataAPI(wrapper.EWrapper, EClient):
                 WHERE
                     Contract = '{}'
                """.format(self.symbol)
-        cur.execute(sql)
-        last_time = cur.fetchone()[0]
+        self.cur.execute(sql)
+        last_time = self.cur.fetchone()[0]
+        self.data_conn.commit()
 
         current_time = int(time_module.time())
 
@@ -301,11 +294,12 @@ class DataAPI(wrapper.EWrapper, EClient):
             if self.__duration >= self.max_duration:
                 self.__duration = self.max_duration
         print("duration", self.__duration)
-        sql_conn.close()
+        self.data_conn.close()
 
 
 if __name__ == '__main__':
     dataapi = DataAPI('EUR', 'FX')
+    time.sleep(1)
     dataapi.request_historical_bar()
     dataapi.historical_to_database()
     dataapi.request_realtime_bar()

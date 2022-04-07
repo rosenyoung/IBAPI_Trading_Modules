@@ -22,12 +22,12 @@ import numpy as np
 import threading
 import time
 
-from sqlalchemy import create_engine
-import pymysql
+from DataBaseConn import DataBaseConn
+
 
 class Orders(wrapper.EWrapper, EClient):
 
-    def __init__(self,contract_type):
+    def __init__(self, contract_type):
         """
         contract_type:str - 'FX' or 'STK'
         You must create different order object for different contract type
@@ -45,23 +45,9 @@ class Orders(wrapper.EWrapper, EClient):
         # Define the tags of account_summary
         self.account_summary_tag = 'NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue'
 
-        # Database connection setting
-        self.__database_username = 'username'
-        self.__database_password = 'password'
-        self.__database_ip = 'localhost'
-        self.__database_port = 3306
-        self.__database_name = 'databasename'
-        self.engine = create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
-                                    format(self.__database_username, self.__database_password,
-                                           self.__database_ip, self.__database_name))
-        self.data_conn = pymysql.connect(host=self.__database_ip,
-                                   user=self.__database_username,
-                                   password=self.__database_password,
-                                   database=self.__database_name,
-                                   port=self.__database_port,
-                                   )
-        self.cur = self.data_conn.cursor()
-
+        database_conn = DataBaseConn()
+        self.data_conn = database_conn.conn
+        self.cur = database_conn.cur
 
         # Creating  a random number between 100-149 as clientId
         CId = np.random.randint(100, 150)
@@ -202,7 +188,7 @@ class Orders(wrapper.EWrapper, EClient):
         # Sleep 1 second to avoid duplicated orderID
         time.sleep(1)
 
-    def orderStatus(self, orderId , status, filled,
+    def orderStatus(self, orderId, status, filled,
                     remaining, avgFillPrice, permId,
                     parentId, lastFillPrice, clientId,
                     whyHeld, mktCapPrice):
@@ -210,7 +196,7 @@ class Orders(wrapper.EWrapper, EClient):
         Save order status into database.
         Once order status is updated, call the reqPositions function and update position information.
         """
-        current_time = time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time()))
+        current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))
         order_status_sql = f"""
         UPDATE orderstatus
         SET
@@ -223,7 +209,7 @@ class Orders(wrapper.EWrapper, EClient):
 	    WHERE
 	    OrderID = {orderId}
         """
-        print("Updating order status: "+ order_status_sql)
+        print("Updating order status: " + order_status_sql)
 
         try:
             self.cur.execute(order_status_sql)
@@ -235,11 +221,8 @@ class Orders(wrapper.EWrapper, EClient):
         # Update position data after an order is placed
         self.reqPositions()
 
-
-
-
-    def accountSummary(self, reqId:int, account:str, tag:str, value:str,
-                       currency:str):
+    def accountSummary(self, reqId: int, account: str, tag: str, value: str,
+                       currency: str):
         # Saving account summary to database
         current_timestamp = int(time.time())
         upd_account_summary_sql = f"""
@@ -257,12 +240,10 @@ class Orders(wrapper.EWrapper, EClient):
             self.data_conn.rollback()
             print("Error {} happened when updating order status!".format(err))
 
-
-    def accountSummaryEnd(self, reqId:int):
+    def accountSummaryEnd(self, reqId: int):
         # Notify an account summary request has ended.
         self.cancelAccountSummary(reqId)
         print(f"Account summary request {reqId} ends!")
-
 
     def position(self, account, contract, position,
                  avgCost):
@@ -295,12 +276,12 @@ class Orders(wrapper.EWrapper, EClient):
                                     WHERE
                                         contract = '{symbol}' 
                                         AND `timestamp` = (
-                                        SELECT
-                                            MAX( `timestamp` ) 
-                                        FROM
-                                            position 
-                                        WHERE
-                                        contract = '{symbol}')
+                                            SELECT
+                                                MAX( `timestamp` ) 
+                                            FROM
+                                                position 
+                                            WHERE
+                                            contract = '{symbol}')
         """
         self.cur.execute(current_postion_sql)
         current_position = self.cur.fetchone()[0]
@@ -308,27 +289,27 @@ class Orders(wrapper.EWrapper, EClient):
 
         if current_position is not None:
             if current_position > 0:
-                self.place_orders(symbol,'MKT','sell',current_position)
+                self.place_orders(symbol, 'MKT', 'sell', current_position)
             elif current_position < 0:
-                self.place_orders(symbol, 'MKT', 'buy', current_position)
+                self.place_orders(symbol, 'MKT', 'buy', abs(current_position))
 
         print("Position Cleared")
-
 
     def positionEnd(self):
         # Notify an position information request has ended.
         self.cancelPositions()
         print("Request position end!")
 
+
 if __name__ == '__main__':
     orders_api = Orders('FX')
     time.sleep(5)
-    orders_api.place_orders('EUR','MKT','buy',110000)
-    orders_api.place_orders('GBP','MKT','buy',100000)
-    orders_api.place_orders('EUR','LMT','sell',100000,1.30)
+    orders_api.place_orders('EUR', 'MKT', 'buy', 110000)
+    orders_api.place_orders('GBP', 'MKT', 'buy', 100000)
+    orders_api.place_orders('EUR', 'LMT', 'sell', 100000, 1.30)
     time.sleep(5)
-    orders_api.place_orders('EUR','MKT','sell',100000)
-    orders_api.place_orders('GBP','MKT','sell',100000)
+    orders_api.place_orders('EUR', 'MKT', 'sell', 100000)
+    orders_api.place_orders('GBP', 'MKT', 'sell', 100000)
     get_orderid_sql = "Select orderid FROM orderstatus WHERE status != 'filled' order by orderid desc"
     orders_api.cur.execute(get_orderid_sql)
     orderid = orders_api.cur.fetchone()[0]
@@ -340,12 +321,3 @@ if __name__ == '__main__':
 
     orders_api.reqAccountSummary(orders_api.reqID, 'All', orders_api.account_summary_tag)
     orders_api.increment_id()
-
-
-
-
-
-
-
-
-
