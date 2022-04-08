@@ -23,6 +23,9 @@ import time as time_module
 
 from DataBaseConn import DataBaseConn
 
+from loguru import logger
+logger.add("..\logs\\DataAPI_{time}.log", rotation="00:00")
+
 
 
 
@@ -55,7 +58,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         elif self.contract_type == 'FX':
             self.contract = self.fx_contract(symbol)
         else:
-            print.critical(" Not a supported symbol")
+            raise Exception(" Not a supported symbol")
 
         # Create a list to store data temporary
         self.data = []
@@ -75,7 +78,7 @@ class DataAPI(wrapper.EWrapper, EClient):
         # Creating  a random number as clientId
         CId = np.random.randint(100)
 
-        print('DataAPI Connecintg...')
+        logger.info('DataAPI Connecintg...')
         # connect to the IB TWS
         self.connect('127.0.0.1', 7497, clientId=CId)
 
@@ -104,7 +107,7 @@ class DataAPI(wrapper.EWrapper, EClient):
 
     def connectAck(self):
         """ callback signifying completion of successful connection """
-        print('DataAPI Connected.')
+        logger.info('DataAPI Connected.')
 
     # Define foreign exchange contract
     @staticmethod
@@ -151,8 +154,8 @@ class DataAPI(wrapper.EWrapper, EClient):
                           columns=['Contract', 'DateTime', 'Open', 'High', 'Low', 'Close', 'Volume', 'Average',
                                    'Count'])
         df.to_csv('..\data\historicaldata.csv')
-        print(df.head(10))
-        print("Historical data saved to csv")
+        print(df.head(5))
+        logger.info("Historical data saved to csv")
 
     def historical_to_database(self):
         """
@@ -180,12 +183,12 @@ class DataAPI(wrapper.EWrapper, EClient):
             if len(df) > 0 :
                 df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=2000,
                           method='multi')
-                print("Historical data saved successfully.")
+                logger.info("Historical data saved successfully.")
             else:
-                print("No data is needed to be saved")
+                logger.info("No data is needed to be saved")
             self.__historical_flag = True
         except Exception as err:
-            print("Error {} occured when storing historical data to database!".format(err))
+            logger.warning("Error {} occured when storing historical data to database!".format(err))
             self.__historical_flag = False
 
     # clear the data list
@@ -208,13 +211,15 @@ class DataAPI(wrapper.EWrapper, EClient):
             if len(df) > 1:
                 df = df.tail(1)
             if len(df) > 0:
-                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
                 print("Saving real-time bar...")
+                print(df)
+                df.to_sql(name='fivesecondbar', con=self.engine, if_exists='append', index=False, chunksize=100)
+
 
                 # return the real-time data for further use
                 self.dataframe = df
         except Exception as err:
-            print("Error {} occured when storing real_time data to database!".format(err))
+            logger.warning("Error {} occured when storing real_time data to database!".format(err))
             # Normally, the first real-time data is likely to concur an IntegrityError(Overlapping data)
             # But it does not matter.
 
@@ -252,14 +257,14 @@ class DataAPI(wrapper.EWrapper, EClient):
         """
         count = 1
         while True:
-            print("Historical data have not been updated!")
+            logger.info("Start requesting real-time data...")
             time_module.sleep(1)
             count += 1
             if self.__historical_flag:
                 print("Historical data updated!")
                 break
             if count > 60:
-                print("Waiting too long...")
+                logger.warning("Waiting too long...")
                 break
         if self.__historical_flag:
             self.reqRealTimeBars(self.reqID, self.contract, 5, 'MIDPOINT', 1, [])

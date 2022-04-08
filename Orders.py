@@ -24,6 +24,9 @@ import time
 
 from DataBaseConn import DataBaseConn
 
+from loguru import logger
+logger.add("..\logs\\Orders_{time}.log", rotation="00:00")
+
 
 class Orders(wrapper.EWrapper, EClient):
 
@@ -40,7 +43,7 @@ class Orders(wrapper.EWrapper, EClient):
 
         # Check contract type
         if self.contract_type not in ['STK', 'FX']:
-            print(" Not a supported symbol")
+            raise Exception(" Not a supported symbol")
 
         # Define the tags of account_summary
         self.account_summary_tag = 'NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue'
@@ -52,7 +55,7 @@ class Orders(wrapper.EWrapper, EClient):
         # Creating  a random number between 100-149 as clientId
         CId = np.random.randint(100, 150)
 
-        print('Orders API Connecintg...')
+        logger.info('Orders API Connecintg...')
         # connect to the IB TWS
         self.connect('127.0.0.1', 7497, clientId=CId)
 
@@ -73,7 +76,7 @@ class Orders(wrapper.EWrapper, EClient):
 
     def connectAck(self):
         """ callback signifying completion of successful connection """
-        print('Orders API Connected.')
+        logger.info('Orders API Connected.')
 
     # Define foreign exchange contract
     @staticmethod
@@ -169,6 +172,8 @@ class Orders(wrapper.EWrapper, EClient):
 
         # Place the order
         self.placeOrder(timestamp, self.contract, order)
+        logger.info(f"Placed an order: OrderId : {timestamp}, Contract : {symbol}, Type : {order_type}, "
+                    f"Action: {action}, Amount: {amount} ")
 
         # Save the order submitted immediately, waiting for
         initial_order_sql = f"""
@@ -183,7 +188,7 @@ class Orders(wrapper.EWrapper, EClient):
             self.data_conn.commit()
         except Exception as err:
             self.data_conn.rollback()
-            print("Error {} happened when initially saving order status!".format(err))
+            logger.warning("Error {} happened when initially saving order status!".format(err))
 
         # Sleep 1 second to avoid duplicated orderID
         time.sleep(1)
@@ -210,13 +215,14 @@ class Orders(wrapper.EWrapper, EClient):
 	    OrderID = {orderId}
         """
         print("Updating order status: " + order_status_sql)
+        logger.info(f"Order status: Orderid : {orderId}, Status : {status}, AvgPrice : {avgFillPrice}")
 
         try:
             self.cur.execute(order_status_sql)
             self.data_conn.commit()
         except Exception as err:
             self.data_conn.rollback()
-            print("Error {} happened when updating order status!".format(err))
+            logger.warning("Error {} happened when updating order status!".format(err))
 
         # Update position data after an order is placed
         self.reqPositions()
@@ -232,18 +238,19 @@ class Orders(wrapper.EWrapper, EClient):
 	    ON DUPLICATE KEY UPDATE
 		{tag} = '{value}'
         """
+        logger.info(f"Account summary: {tag} : {value}")
         print('Account summary sql: ' + upd_account_summary_sql)
         try:
             self.cur.execute(upd_account_summary_sql)
             self.data_conn.commit()
         except Exception as err:
             self.data_conn.rollback()
-            print("Error {} happened when updating order status!".format(err))
+            logger.warning("Error {} happened when updating order status!".format(err))
 
     def accountSummaryEnd(self, reqId: int):
         # Notify an account summary request has ended.
         self.cancelAccountSummary(reqId)
-        print(f"Account summary request {reqId} ends!")
+        logger.info(f"Account summary request {reqId} ends!")
 
     def position(self, account, contract, position,
                  avgCost):
@@ -259,13 +266,14 @@ class Orders(wrapper.EWrapper, EClient):
         		AvgCost = '{avgCost}'
                 """
         print('Position sql: ' + upd_position_sql)
+        logger.info(f"Current Position: Contract : {contract.symbol}, Position ; {position}, AvgCost : {avgCost}")
 
         try:
             self.cur.execute(upd_position_sql)
             self.data_conn.commit()
         except Exception as err:
             self.data_conn.rollback()
-            print("Error {} happened when updating position information!".format(err))
+            logger.warning("Error {} happened when updating position information!".format(err))
 
     def clear_position(self, symbol):
         # Clear current position of an asset
@@ -286,6 +294,7 @@ class Orders(wrapper.EWrapper, EClient):
         self.cur.execute(current_postion_sql)
         current_position = self.cur.fetchone()[0]
         print("Current position: " + str(current_position))
+        logger.info(f"Start to clear {symbol} current position")
 
         if current_position is not None:
             if current_position > 0:
@@ -293,12 +302,12 @@ class Orders(wrapper.EWrapper, EClient):
             elif current_position < 0:
                 self.place_orders(symbol, 'MKT', 'buy', abs(current_position))
 
-        print("Position Cleared")
+        logger.info("Position Cleared")
 
     def positionEnd(self):
         # Notify an position information request has ended.
         self.cancelPositions()
-        print("Request position end!")
+        logger.info("Request position end!")
 
 
 if __name__ == '__main__':

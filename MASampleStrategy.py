@@ -15,6 +15,9 @@ import pandas as pd
 
 from DataBaseConn import DataBaseConn
 
+from loguru import logger
+logger.add("..\logs\\MASampleStrategy_{time}.log", rotation="00:00")
+
 
 class MovingAverageStrategy:
     def __init__(self, symbol: str, contract_type: str, short_period: int, long_period: int):
@@ -111,11 +114,13 @@ class MovingAverageStrategy:
                  if position_status != 1:
                     order = self.order_api.MarketOrder('buy', 100000+abs(current_position))
                     self.order_api.placeOrder(orderId, contract, order)
+                    logger.info(f"Create a long order: OrderID : {orderId}")
 
             elif (ma_s < ma_l) & (ma_s_previous > ma_l_previous):
                  if position_status != -1:
                     order = self.order_api.MarketOrder('sell', 100000+abs(current_position))
                     self.order_api.placeOrder(orderId, contract, order)
+                    logger.info(f"Create a short order: OrderID : {orderId}")
 
             time.sleep(5)
             timecount +=5
@@ -123,8 +128,10 @@ class MovingAverageStrategy:
             # Stop after 4 hours and clear the position
             if timecount > 14400:
                 self.order_api.clear_position(self.symbol)
+                logger.info("Stop the strategy")
                 time.sleep(5)
                 break
+
 
 
 if __name__ == "__main__":
