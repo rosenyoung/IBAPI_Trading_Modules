@@ -41,15 +41,16 @@ class DataBaseConn:
                When length = 2880, it requests trading data of last 4 hours.
         """
         historical_sql = f"""
-                            SELECT
+                           SELECT
                                 * 
                             FROM
-                                `fivesecondbar`
-                            WHERE Contract = '{symbol}' 
+                                ( SELECT * FROM `fivesecondbar` 
+                                            WHERE Contract = '{symbol}' 
+                                            ORDER BY `DateTime` DESC LIMIT {length} ) 
+                                            AS lastdata 
                             ORDER BY
-                                `DateTime` DESC 
-                            LIMIT {length}
-                            """
+                                lastdata.`DateTime`
+	"""
 
         historical_df = pd.read_sql_query(historical_sql, self.engine)
 
