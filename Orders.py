@@ -7,7 +7,8 @@ This module can update account summary information if you want.
 
 Version 1.0 2022-04-03
 Support 3 kinds of order: Market, Limit, Market if touched
-
+Version 1.1 2022-04-07
+Add a loguru module to create log files
 """
 
 from ibapi import wrapper

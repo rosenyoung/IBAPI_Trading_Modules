@@ -4,6 +4,8 @@ This is a sample strategy
 
 Version 1.0 2022-04-07
 This is a sample strategy
+Version 1.1 2022-04-09
+Add a loguru module to create log files
 """
 
 import time

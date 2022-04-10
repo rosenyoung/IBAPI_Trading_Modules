@@ -6,6 +6,8 @@ the function of EWrapper, translate the data requested into dataframe and store 
 
 Version 1.0 2022-03-17
 This API is designed for 5 seconds bar data only.
+Version 1.1 2022-04-07
+Add a loguru module to create log files
 
 """
 import time
