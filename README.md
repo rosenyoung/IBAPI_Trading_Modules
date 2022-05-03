@@ -10,3 +10,5 @@ Orders.py is used for placing orders. Except placing orders it can also be used 
 DataBaseConn is used for connecting the database, and acquire historical data from database. Modify your database connection parameters in this module.
 
 MASampleStrategy is a sample strategy.(Do not expect that this strategy could earn a profit). Use it as a reference and construct your own strategy.
+
+I planned to create a backtesting module. However, after I viewed other sources, I found existing sources like backtrader have done this job much better and completely than me. I decide to use backtrader as the back testing module and give an example.
